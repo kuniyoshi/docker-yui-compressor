@@ -1,0 +1,165 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Data::Dumper;
+use File::Basename ( );
+use Getopt::Long;
+
+use constant DEBUG                 => $ENV{YUI_COMPRESSOR_DEBUG};
+use constant IMAGE_NAME            => "yui-compressor";
+use constant CONTAINER_BRIDGE_FROM => "/tmp/docker/yui-compressor";
+use constant CONTAINER_BRIDGE_TO   => "/opt/yui-compressor/public";
+
+our $VERSION = "0.01";
+
+GetOptions(
+    "version|V"             => \my $version,
+    "help|h"                => \my $help,
+    "type=s"                => \my $type,
+    "charset=s"             => \my $charset,
+    "line-break=i"          => \my $line_break,
+    "verbose|v"             => \my $verbose,
+    "m=s"                   => \my $m,
+    "o=s"                   => \my $o,
+    "nomunge"               => \my $nomunge,
+    "preserve-semi"         => \my $preserve_semi,
+    "disable-optimizations" => \my $disable_optimizations,
+    "container_bridge_path" => \my $container_bridge_path,
+);
+
+my @yui_compressor_input_files = @ARGV;
+
+ASSURE_BRIDGE_PATH_EXISTS: {
+    $container_bridge_path ||= CONTAINER_BRIDGE_FROM;
+
+    if ( !-e $container_bridge_path ) {
+        `mkdir -p $container_bridge_path`;
+    }
+
+    die "Could not mkdir [$container_bridge_path]"
+        if !-e $container_bridge_path;
+}
+
+my @docker_options;
+
+PUSH_VOLUME_OPTIONS_RELATED_WITH_INPUT_FILE: {
+    for my $input_file ( @yui_compressor_input_files ) {
+        die "Invalid filename found[$input_file], it should *NOT* contain `..` path."
+            if 0 <= index $input_file, q{..};
+
+        system( "rsync", "-a", "-R", $input_file, $container_bridge_path ) == 0
+            or die "Could not rsync [$input_file] to [$container_bridge_path]: $!";
+    }
+
+    push @docker_options, ( "-v", sprintf "%s:%s:rw", CONTAINER_BRIDGE_FROM, CONTAINER_BRIDGE_TO );
+}
+
+ASSURE_CONTAINER_NAME: {
+    my $name = sprintf "%s%d", File::Basename::basename( $0, qw( .pl ) ), $$;
+
+    push @docker_options, ( "--name", $name );
+}
+
+my @yui_compressor_options;
+
+PUSH_YUI_COMPRESSOR_OPTIONS: {
+    push @yui_compressor_options, ( "-V" )
+        if $version;
+    push @yui_compressor_options, ( "-h" )
+        if $help;
+    push @yui_compressor_options, ( "--type", $type )
+        if defined $type;
+    push @yui_compressor_options, ( "--charset", $charset )
+        if defined $charset;
+    push @yui_compressor_options, ( "--line-break", $line_break )
+        if defined $line_break;
+    push @yui_compressor_options, ( "-v" )
+        if $verbose;
+    push @yui_compressor_options, ( "-m", $m )
+        if defined $m;
+    if ( defined $o ) {
+        print "You may see the result file at $container_bridge_path\n";
+        push @yui_compressor_options, ( "-o", $o );
+    }
+    push @yui_compressor_options, ( "--nomunge" )
+        if $nomunge;
+    push @yui_compressor_options, ( "--preserve-semi" )
+        if $preserve_semi;
+    push @yui_compressor_options, ( "--disable-optimizations" )
+        if $disable_optimizations;
+    push @yui_compressor_options, @yui_compressor_input_files;
+}
+
+my @specific_words = qw(
+    sudo  docker  run  --rm --privileged=true  -i  -t
+);
+
+# to read input file, `privileged` or `chcon` is required.
+
+my $command = join q{ }, (
+    @specific_words,
+    @docker_options,
+    IMAGE_NAME,
+    @yui_compressor_options,
+);
+
+if ( DEBUG ) {
+    warn $command;
+    exit;
+}
+
+exec $command;
+
+
+sub usage {
+    return <<END_USAGE;
+usage: $0 [options] <input file>
+
+Options
+  -V, --version             Print version information
+  -h, --help                Displays this information
+  --type <js|css>           Specifies the type of the input file
+  --charset <charset>       Read the input file using <charset>
+  --line-break <column>     Insert a line break after the specified column number
+  -v, --verbose             Display informational messages and warnings
+  -m <file>                 Place a mapping of munged identifiers to originals in this file
+
+  -o <file>                 Place the output into <file>. Defaults to stdout.
+                            Multiple files can be processed using the following syntax:
+                            java -jar yuicompressor.jar -o '.css$:-min.css' *.css
+                            java -jar yuicompressor.jar -o '.js$:-min.js' *.js
+
+JavaScript Options
+  --nomunge                 Minify only, do not obfuscate
+  --preserve-semi           Preserve all semicolons
+  --disable-optimizations   Disable all micro optimizations
+END_USAGE
+}
+
+__END__
+sudo docker run \
+    --rm \
+    -i \
+    -t \
+    yui-compressor
+
+Usage: java -jar yuicompressor-2.4.8.jar [options] [input file]
+
+Global Options
+  -V, --version             Print version information
+  -h, --help                Displays this information
+  --type <js|css>           Specifies the type of the input file
+  --charset <charset>       Read the input file using <charset>
+  --line-break <column>     Insert a line break after the specified column number
+  -v, --verbose             Display informational messages and warnings
+  -m <file>                 Place a mapping of munged identifiers to originals in this file
+
+  -o <file>                 Place the output into <file>. Defaults to stdout.
+                            Multiple files can be processed using the following syntax:
+                            java -jar yuicompressor.jar -o '.css$:-min.css' *.css
+                            java -jar yuicompressor.jar -o '.js$:-min.js' *.js
+
+JavaScript Options
+  --nomunge                 Minify only, do not obfuscate
+  --preserve-semi           Preserve all semicolons
+  --disable-optimizations   Disable all micro optimizations
