@@ -6,7 +6,7 @@ use File::Basename ( );
 use Getopt::Long;
 
 use constant DEBUG                 => $ENV{YUI_COMPRESSOR_DEBUG};
-use constant IMAGE_NAME            => "yui-compressor";
+use constant IMAGE_NAME            => "docker-yui-compressor";
 use constant CONTAINER_BRIDGE_FROM => "/tmp/docker/yui-compressor";
 use constant CONTAINER_BRIDGE_TO   => "/opt/yui-compressor/public";
 
